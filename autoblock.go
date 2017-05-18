@@ -40,10 +40,17 @@ var blockReason = map[string]string{
 
 func main() {
 
-	be, _ := logging.NewSyslogBackend("autoblock")
-	bel := logging.AddModuleLevel(be)
-	bel.SetLevel(logging.DEBUG, "")
-	log.SetBackend(bel)
+	beStdErr := logging.NewLogBackend(os.Stderr, "", 0)
+	beSyslog, _ := logging.NewSyslogBackend("autoblock")
+	besysl := logging.AddModuleLevel(beSyslog)
+	bestdErrl := logging.AddModuleLevel(beStdErr)
+	level, err := logging.LogLevel("DEBUG")
+	if err != nil {
+		log.Fatal("Log level is not valid")
+	}
+	besysl.SetLevel(level, "")
+	bestdErrl.SetLevel(level, "")
+	logging.SetBackend(besysl, bestdErrl)
 
 	log.Info("Starting...")
 
@@ -79,7 +86,7 @@ func golookup(ch chan net.IP, c *cache.Cache) {
 func gofilter(i int, ch chan net.IP, c *cache.Cache) {
 	nfq, err := netfilter.NewNFQueue(uint16(i), 100, netfilter.NF_DEFAULT_PACKET_SIZE)
 	if err != nil {
-		fmt.Println(err)
+		log.Critical(err)
 		os.Exit(1)
 	}
 	defer nfq.Close()
@@ -98,12 +105,12 @@ func gofilter(i int, ch chan net.IP, c *cache.Cache) {
 				} else {
 					if !found {
 						ch <- ipl.SrcIP
-						fmt.Println(ipl.SrcIP.String(), "passed okay")
+						log.Debug(ipl.SrcIP.String(), "passed okay")
 					}
 					p.SetVerdict(netfilter.NF_ACCEPT)
 				}
 			} else {
-				fmt.Println("Not IP packet")
+				log.Error("Not IP packet")
 			}
 		}
 	}
@@ -120,10 +127,10 @@ func checkBlocklist(src net.IP) (net.IP, error) {
 	ips, err := net.LookupIP(blocklistedhost)
 
 	if err != nil {
-		fmt.Println(src.String(), "not found in blocklist", err)
+		log.Debug(src.String(), "not found in blocklist", err)
 		return nil, err
 	} else {
-		fmt.Println(src.String(), "found in blocklist:", blockReason[ips[0].String()])
+		log.Debug(src.String(), "found in blocklist:", blockReason[ips[0].String()])
 		return ips[0], err // only the first one required
 	}
 
