@@ -63,8 +63,11 @@ func main() {
 
 	// Create a cache with a default expiration time of 5 minutes, and which
 	// purges expired items every 30 seconds
+	// This makes some sense as DNS blocklist entries expire, and IP traffic per
+	// entry would normally be low (few retries as they don't get a response)
 	c := cache.New(5*time.Minute, 30*time.Second)
 
+	// one worker per queue
 	for i := 0; i < 4; i++ {
 		go gofilter(i, lookupChannel, c)
 	}
@@ -81,7 +84,7 @@ func golookup(ch chan net.IP, c *cache.Cache) {
 				if result != nil {
 					c.Set(ip.String(), result, cache.DefaultExpiration)
 				} else {
-					c.Set(ip.String(), net.IPv4(0, 0, 0, 0), cache.DefaultExpiration)
+					c.Set(ip.String(), net.IPv4(0, 0, 0, 0), cache.DefaultExpiration) // cache as not blocked
 				}
 			}
 		}
@@ -109,7 +112,7 @@ func gofilter(i int, ch chan net.IP, c *cache.Cache) {
 					log.Info(ipl.SrcIP.String() + " to " + ipl.DstIP.String() + " blocked for reason: " + blockReason[reason.(net.IP).String()])
 				} else {
 					if !found {
-						ch <- ipl.SrcIP
+						ch <- ipl.SrcIP // enqueue for checks, out of this processing band
 						log.Debug(ipl.SrcIP.String(), "passed okay")
 					}
 					p.SetVerdict(netfilter.NF_ACCEPT)
