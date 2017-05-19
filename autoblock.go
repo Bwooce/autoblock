@@ -15,7 +15,7 @@ import (
 var log = logging.MustGetLogger("autoblock")
 
 var blockReason = map[string]string{
-	"127.0.0.2":  "amavis",
+	"127.0.0.2":  "amavis[blocklist.de] or bogon",
 	"127.0.0.3":  "apacheddos",
 	"127.0.0.4":  "asterisk",
 	"127.0.0.5":  "badbot",
@@ -36,6 +36,11 @@ var blockReason = map[string]string{
 	"127.0.0.20": "manual",
 	"127.0.0.21": "bruteforcelogin",
 	"127.0.0.22": "mysql",
+}
+
+var blocklists4 = map[string]string{
+	"blocklist.de": ".all.bl.blocklist.de",
+	"cymru bogons": ".v4.fullbogons.cymru.com",
 }
 
 func main() {
@@ -72,7 +77,7 @@ func golookup(ch chan net.IP, c *cache.Cache) {
 		case ip := <-ch:
 			_, found := c.Get(ip.String()) // check again, it may have been enqueued multiple times.
 			if !found {
-				result, _ := checkBlocklist(ip)
+				result, _ := checkBlocklists(ip)
 				if result != nil {
 					c.Set(ip.String(), result, cache.DefaultExpiration)
 				} else {
@@ -116,24 +121,26 @@ func gofilter(i int, ch chan net.IP, c *cache.Cache) {
 	}
 }
 
-func checkBlocklist(src net.IP) (net.IP, error) {
-	fmt.Println("checkBlocklist:", src)
+func checkBlocklists(src net.IP) (net.IP, error) {
+	log.Debug("checkBlocklist:", src)
 	src4 := src.To4()
 	if src4 == nil {
 		return nil, errors.New("Not IPv4")
 	}
 	//reverse the address
-	blocklistedhost := fmt.Sprintf("%d.%d.%d.%d.%s", src4[3], src4[2], src4[1], src4[0], "all.bl.blocklist.de")
-	ips, err := net.LookupIP(blocklistedhost)
+	reversedaddr := fmt.Sprintf("%d.%d.%d.%d", src4[3], src4[2], src4[1], src4[0])
 
-	if err != nil {
-		log.Debug(src.String(), "not found in blocklist", err)
-		return nil, err
-	} else {
-		log.Debug(src.String(), "found in blocklist:", blockReason[ips[0].String()])
-		return ips[0], err // only the first one required
+	for name, addr := range blocklists4 {
+		ips, err := net.LookupIP(reversedaddr + addr)
+
+		if err != nil {
+			log.Debug(src.String(), "not found in blocklist", name, "result:", err)
+
+		} else {
+			log.Debug(src.String(), "found in blocklist", name, "cause:", blockReason[ips[0].String()])
+			return ips[0], err // only the first one required
+		}
 	}
 
-	blocklistedhost = ".v4.fullbogons.cymru.com"
-	return nil, err
+	return nil, nil
 }
