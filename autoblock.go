@@ -9,9 +9,9 @@ import (
 	"github.com/op/go-logging"
 	"github.com/patrickmn/go-cache"
 	"net"
+	"net/http"
 	"os"
 	"time"
-	"net/http"
 )
 
 var log = logging.MustGetLogger("autoblock")
@@ -46,8 +46,9 @@ var blocklists4 = map[string]string{
 }
 
 var (
-	countDNSqueries, countDNSqueriesSuccess expvar.Int
-	count4Packets, count4PacketsBlocked     expvar.Int
+	countDNSqueries, countDNSqueriesSuccess                   expvar.Int
+	count4Packets, count4PacketsBlocked                       expvar.Int
+	countCacheHitsBlock, countCacheHitsPass, countCacheMisses expvar.Int
 )
 
 func init() {
@@ -57,6 +58,9 @@ func init() {
 	m.Set("dnsQueriesSuccess", &countDNSqueriesSuccess)
 	m.Set("ipv4Packets", &count4Packets)
 	m.Set("ipv4PacketsBlocked", &count4PacketsBlocked)
+	m.Set("cacheHitsBlock", &countCacheHitsBlock)
+	m.Set("cacheHitsPass", &countCacheHitsPass)
+	m.Set("cacheHitsMisses", &countCacheMisses)
 }
 
 func main() {
@@ -127,13 +131,17 @@ func gofilter(i int, ch chan net.IP, c *cache.Cache) {
 				ipl, _ := ipLayer.(*layers.IPv4)
 				reason, found := c.Get(ipl.SrcIP.String())
 				if found && !reason.(net.IP).Equal(net.IPv4(0, 0, 0, 0)) {
+					countCacheHitsBlock.Add(1)
 					p.SetVerdict(netfilter.NF_DROP)
 					log.Info(ipl.SrcIP.String() + " to " + ipl.DstIP.String() + " blocked for reason: " + blockReason[reason.(net.IP).String()])
 					count4PacketsBlocked.Add(1)
 				} else {
 					if !found {
+						countCacheMisses.Add(1)
 						ch <- ipl.SrcIP // enqueue for checks, out of this processing band
 						log.Debug(ipl.SrcIP.String(), "passed okay")
+					} else {
+						countCacheHitsPass.Add(1)
 					}
 					p.SetVerdict(netfilter.NF_ACCEPT)
 				}
