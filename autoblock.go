@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"expvar"
 	"fmt"
 	"github.com/AkihiroSuda/go-netfilter-queue"
 	"github.com/google/gopacket/layers"
@@ -10,6 +11,7 @@ import (
 	"net"
 	"os"
 	"time"
+	"net/http"
 )
 
 var log = logging.MustGetLogger("autoblock")
@@ -43,6 +45,20 @@ var blocklists4 = map[string]string{
 	"cymru bogons": ".v4.fullbogons.cymru.com",
 }
 
+var (
+	countDNSqueries, countDNSqueriesSuccess expvar.Int
+	count4Packets, count4PacketsBlocked     expvar.Int
+)
+
+func init() {
+
+	m := expvar.NewMap("autoblock")
+	m.Set("dnsQueries", &countDNSqueries)
+	m.Set("dnsQueriesSuccess", &countDNSqueriesSuccess)
+	m.Set("ipv4Packets", &count4Packets)
+	m.Set("ipv4PacketsBlocked", &count4PacketsBlocked)
+}
+
 func main() {
 
 	beStdErr := logging.NewLogBackend(os.Stderr, "", 0)
@@ -58,6 +74,8 @@ func main() {
 	logging.SetBackend(besysl, bestdErrl)
 
 	log.Info("Starting...")
+
+	go http.ListenAndServe(":8080", nil) // expvar serving, not for anything else
 
 	lookupChannel := make(chan net.IP, 1000)
 
@@ -105,11 +123,13 @@ func gofilter(i int, ch chan net.IP, c *cache.Cache) {
 		case p := <-packets:
 
 			if ipLayer := p.Packet.Layer(layers.LayerTypeIPv4); ipLayer != nil {
+				count4Packets.Add(1)
 				ipl, _ := ipLayer.(*layers.IPv4)
 				reason, found := c.Get(ipl.SrcIP.String())
 				if found && !reason.(net.IP).Equal(net.IPv4(0, 0, 0, 0)) {
 					p.SetVerdict(netfilter.NF_DROP)
 					log.Info(ipl.SrcIP.String() + " to " + ipl.DstIP.String() + " blocked for reason: " + blockReason[reason.(net.IP).String()])
+					count4PacketsBlocked.Add(1)
 				} else {
 					if !found {
 						ch <- ipl.SrcIP // enqueue for checks, out of this processing band
@@ -135,11 +155,12 @@ func checkBlocklists(src net.IP) (net.IP, error) {
 
 	for name, addr := range blocklists4 {
 		ips, err := net.LookupIP(reversedaddr + addr)
-
+		countDNSqueries.Add(1)
 		if err != nil {
 			log.Debug(src.String(), "not found in blocklist", name, "result:", err)
 
 		} else {
+			countDNSqueriesSuccess.Add(1)
 			log.Debug(src.String(), "found in blocklist", name, "cause:", blockReason[ips[0].String()])
 			return ips[0], err // only the first one required
 		}
