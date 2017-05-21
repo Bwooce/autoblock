@@ -60,7 +60,7 @@ func init() {
 	m.Set("ipv4PacketsBlocked", &count4PacketsBlocked)
 	m.Set("cacheHitsBlock", &countCacheHitsBlock)
 	m.Set("cacheHitsPass", &countCacheHitsPass)
-	m.Set("cacheHitsMisses", &countCacheMisses)
+	m.Set("cacheMisses", &countCacheMisses)
 }
 
 func main() {
